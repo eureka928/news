@@ -23,6 +23,7 @@ use OCA\News\Vendor\FeedIo\Feed\ItemInterface;
 use OCA\News\Vendor\FeedIo\FeedInterface;
 use OCA\News\Vendor\FeedIo\FeedIo;
 use OCA\News\Vendor\FeedIo\Reader\Result;
+use OCA\News\Vendor\FeedIo\Reader\ReadErrorException;
 use OC\L10N\L10N;
 use \OCA\News\Db\Feed;
 use \OCA\News\Db\Item;
@@ -513,6 +514,38 @@ class FeedFetcherTest extends TestCase
         $resultItem = $result[1][0];
         $this->assertEquals($this->permalink, $resultItem->getGuid());
     }
+
+    /**
+     * Test that TypeError from feed-io is converted to ReadErrorException.
+     * This handles cases where feed content starts with '{' but is not valid JSON.
+     *
+     * @see https://github.com/nextcloud/news/issues/3129
+     */
+    public function testFetchTypeErrorThrowsReadErrorException(): void
+    {
+        $errorMessage = 'loadJsonAsArray(): Return value must be of type array, null returned';
+
+        $this->reader->expects($this->once())
+            ->method('read')
+            ->with($this->url)
+            ->will($this->throwException(new \TypeError($errorMessage)));
+
+        $this->logger->expects($this->once())
+            ->method('warning')
+            ->with(
+                $this->stringContains('TypeError while parsing feed'),
+                $this->callback(function ($context) use ($errorMessage) {
+                    return isset($context['url']) && isset($context['message'])
+                        && $context['message'] === $errorMessage;
+                })
+            );
+
+        $this->expectException(ReadErrorException::class);
+        $this->expectExceptionMessage('Failed to parse feed: ' . $errorMessage);
+
+        $this->fetcher->fetch($this->url, false, null, null, null);
+    }
+
     /**
      * Mock an iteration option on an existing mock
      *
